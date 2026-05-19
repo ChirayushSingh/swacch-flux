@@ -1,0 +1,835 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// --- Multi-Tenancy ---
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  type        String   @default("MUNICIPAL_CORP") // MUNICIPAL_CORP, CONTRACTOR_ORG, SMART_CITY_PROJ
+  code        String   @unique // e.g., BMC, PMC
+  logo        String?
+  config      String?  // SQLite doesn't handle Json well in older versions, using String for compatibility
+  
+  users       User[]
+  zones       Zone[]
+  complaints  Complaint[]
+  contractors Contractor[]
+  slaRules    SlaRule[]
+  attendance  Attendance[]
+  vehicles    Vehicle[]
+  routes      Route[]
+  penalties   PenaltyLog[]
+  fuelLogs    FuelLog[]
+  carbonLogs  CarbonLog[]
+  impactLogs  WasteImpact[]
+  optimizationLogs OptimizationLog[]
+  predictions WastePrediction[]
+  inventory   InventoryItem[]
+  dispatchLogs DispatchLog[]
+  esgReports   ESGReport[]
+  droneFlights DroneFlight[]
+  hotspots     AerialHotspot[]
+  smartBins    SmartBin[]
+  recommendations AiRecommendation[]
+  anomalies    AnomalyLog[]
+  riskScores   RiskScore[]
+  summaries    OperationalSummary[]
+  tenders      Tender[]
+  invoices     Invoice[]
+  documents    Document[]
+  approvals    ApprovalRequest[]
+  auditReports AuditReport[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  isDeleted   Boolean  @default(false)
+}
+
+// --- RBAC ---
+
+model Role {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  permissions Permission[]
+  users       User[]
+}
+
+model Permission {
+  id          String @id @default(uuid())
+  action      String // e.g., "complaint:create", "analytics:view"
+  subject     String // e.g., "Complaint", "Analytics"
+  roles       Role[]
+}
+
+// --- User Management ---
+
+model User {
+  id             String        @id @default(uuid())
+  name           String
+  email          String?       @unique
+  phone          String?       @unique
+  password       String?
+  roleId         String
+  role           Role          @relation(fields: [roleId], references: [id])
+  orgId          String
+  organization   Organization  @relation(fields: [orgId], references: [id])
+  
+  avatar         String?
+  isActive       Boolean       @default(true)
+  lastLogin      DateTime?
+  
+  complaints     Complaint[]   @relation("CitizenComplaints")
+  assignments    Assignment[]
+  logs           ActivityLog[]
+  notifications  Notification[]
+  attendance     Attendance[]
+  tracking       TrackingPing[]
+  wallet         Wallet?
+  rewards        RewardTransaction[]
+  audits         SegregationAudit[]
+  dispatches     DispatchLog[]
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  isDeleted      Boolean       @default(false)
+}
+
+// --- Geography ---
+
+model Zone {
+  id             String       @id @default(uuid())
+  name           String
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  wards          Ward[]
+}
+
+model Ward {
+  id             String       @id @default(uuid())
+  name           String
+  number         String
+  zoneId         String
+  zone           Zone         @relation(fields: [zoneId], references: [id])
+  boundary       String?      // GeoJSON boundary string
+  complaints     Complaint[]
+  routes         Route[]
+  predictions    WastePrediction[]
+  smartBins      SmartBin[]
+}
+
+// --- Complaint Lifecycle ---
+
+model Complaint {
+  id             String        @id @default(uuid())
+  ticketId       String        @unique // e.g., SF-2024-0001
+  title          String
+  description    String
+  category       String
+  status         String        @default("OPEN")
+  priority       String        @default("MEDIUM")
+  
+  // GIS
+  lat            Float
+  lng            Float
+  address        String?
+  wardId         String
+  ward           Ward          @relation(fields: [wardId], references: [id])
+  orgId          String
+  organization   Organization  @relation(fields: [orgId], references: [id])
+  
+  citizenId      String
+  citizen        User          @relation("CitizenComplaints", fields: [citizenId], references: [id])
+  
+  images         ComplaintImage[]
+  assignments    Assignment[]
+  logs           ActivityLog[]
+  feedback       Feedback?
+  insights       AiInsight[]
+  segregationAudit SegregationAudit?
+  dispatchLog    DispatchLog?
+  
+  slaDeadline    DateTime?
+  isEscalated    Boolean       @default(false)
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  isDeleted      Boolean       @default(false)
+
+  @@index([orgId, status])
+  @@index([ticketId])
+}
+
+model ComplaintImage {
+  id             String    @id @default(uuid())
+  complaintId    String
+  url            String
+  type           String    // BEFORE, AFTER
+  metadata       String?   
+  createdAt      DateTime  @default(now())
+
+  complaint      Complaint @relation(fields: [complaintId], references: [id])
+}
+
+model Assignment {
+  id             String    @id @default(uuid())
+  complaintId    String
+  workerId       String
+  assignedAt     DateTime  @default(now())
+  resolvedAt     DateTime?
+  status         String    @default("PENDING") // PENDING, ACCEPTED, REJECTED, COMPLETED
+
+  complaint      Complaint @relation(fields: [complaintId], references: [id])
+  worker         User      @relation(fields: [workerId], references: [id])
+}
+
+// --- System Engine ---
+
+model SlaRule {
+  id             String       @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  category       String
+  priority       String
+  resolutionTime Int          // In hours
+}
+
+model Notification {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  title          String
+  message        String
+  type           String    // SYSTEM, COMPLAINT, ASSIGNMENT
+  isRead         Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+}
+
+model ActivityLog {
+  id             String    @id @default(uuid())
+  complaintId    String?
+  complaint      Complaint? @relation(fields: [complaintId], references: [id])
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  action         String
+  details        String?
+  createdAt      DateTime  @default(now())
+}
+
+model AiInsight {
+  id             String    @id @default(uuid())
+  complaintId    String
+  complaint      Complaint @relation(fields: [complaintId], references: [id])
+  type           String    // DUPLICATE, SURGE_PREDICTION, SLA_RISK
+  confidence     Float
+  data           String?
+  createdAt      DateTime  @default(now())
+}
+
+model Feedback {
+  id             String    @id @default(uuid())
+  complaintId    String    @unique
+  complaint      Complaint @relation(fields: [complaintId], references: [id])
+  rating         Int
+  comment        String?
+  createdAt      DateTime  @default(now())
+}
+
+model Attendance {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  checkIn        DateTime  @default(now())
+  checkOut       DateTime?
+  lat            Float
+  lng            Float
+  status         String    @default("PRESENT") // PRESENT, LATE, ABSENT
+  
+  createdAt      DateTime  @default(now())
+}
+
+model TrackingPing {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  lat            Float
+  lng            Float
+  timestamp      DateTime  @default(now())
+}
+
+// --- Fleet Intelligence ---
+
+model Vehicle {
+  id             String        @id @default(uuid())
+  registrationNo String        @unique // Number Plate
+  type           String        // COMPACTOR, TIPPER, SWEEPING_MACHINE
+  make           String?
+  model          String?
+  
+  orgId          String
+  organization   Organization  @relation(fields: [orgId], references: [id])
+  
+  status         String        @default("ACTIVE") // ACTIVE, IDLE, MAINTENANCE, BREAKDOWN
+  lastPingAt     DateTime?
+  lastLat        Float?
+  lastLng        Float?
+  
+  deviceId       String?       @unique
+  device         GpsDevice?    @relation(fields: [deviceId], references: [id])
+  
+  assignments    RouteAssignment[]
+  pings          VehiclePing[]
+  fuelLogs       FuelLog[]
+  carbonLogs     CarbonLog[]
+  maintenance    MaintenanceLog[]
+  schedules      ServiceSchedule[]
+  edgeAudits     EdgeAudit[]
+  
+  healthScore    Float         @default(100) // 0-100
+  failureRisk    Float         @default(0)   // 0-1
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  isDeleted      Boolean       @default(false)
+}
+
+model GpsDevice {
+  id             String    @id @default(uuid())
+  imei           String    @unique
+  simNumber      String?
+  protocol       String?   // TELTONIKA, CONCOX, MOBILE
+  vehicle        Vehicle?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+}
+
+model VehiclePing {
+  id             String    @id @default(uuid())
+  vehicleId      String
+  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id])
+  lat            Float
+  lng            Float
+  speed          Float     @default(0)
+  heading        Float     @default(0)
+  timestamp      DateTime  @default(now())
+  
+  @@index([vehicleId, timestamp])
+}
+
+model Route {
+  id             String        @id @default(uuid())
+  name           String
+  code           String?       @unique
+  type           String        // DOOR_TO_DOOR, SWEEPING, SECONDARY_TRANSPORT
+  
+  orgId          String
+  organization   Organization  @relation(fields: [orgId], references: [id])
+  
+  geometry       String        // GeoJSON MultiLineString
+  wardId         String?
+  ward           Ward?         @relation(fields: [wardId], references: [id])
+  
+  assignments    RouteAssignment[]
+  coverageLogs   RouteCoverage[]
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model RouteAssignment {
+  id             String    @id @default(uuid())
+  vehicleId      String
+  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id])
+  routeId        String
+  route          Route     @relation(fields: [routeId], references: [id])
+  
+  startTime      String    // e.g., "06:00"
+  endTime        String    // e.g., "14:00"
+  isActive       Boolean   @default(true)
+  
+  createdAt      DateTime  @default(now())
+}
+
+model RouteCoverage {
+  id             String    @id @default(uuid())
+  routeId        String
+  route          Route     @relation(fields: [routeId], references: [id])
+  vehicleId      String
+  date           DateTime
+  
+  plannedDistance Float
+  actualDistance  Float
+  coveragePercent Float
+  missedPoints    String?  // JSON list of missed coordinates
+  
+  status         String    @default("COMPLETED") // COMPLETED, PARTIAL, MISSED
+  penaltyApplied Float     @default(0)
+  
+  createdAt      DateTime  @default(now())
+}
+
+model PenaltyLog {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  type           String    // MISSED_ROUTE, LOW_COVERAGE, EXCESSIVE_IDLE
+  amount         Float
+  details        String?
+  isSettled      Boolean   @default(false)
+  
+  createdAt      DateTime  @default(now())
+}
+
+// --- Sustainability & AI ---
+
+model FuelLog {
+  id             String    @id @default(uuid())
+  vehicleId      String
+  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id])
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  amount         Float     // In Liters
+  cost           Float?
+  odometer       Float?
+  date           DateTime  @default(now())
+  
+  createdAt      DateTime  @default(now())
+}
+
+model CarbonLog {
+  id             String    @id @default(uuid())
+  vehicleId      String
+  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id])
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  co2Emitted     Float     // In kg
+  method         String    @default("DISTANCE_BASED") // FUEL_BASED, DISTANCE_BASED
+  date           DateTime  @default(now())
+  
+  createdAt      DateTime  @default(now())
+}
+
+model WasteImpact {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  weight         Float     // In Metric Tons
+  type           String    // RECYCLED, COMPOSTED, LANDFILL
+  methaneAvoided Float?    // Estimated methane avoided in kg
+  
+  date           DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+}
+
+model OptimizationLog {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  type           String    // ROUTE_OPTIMIZATION, WORKFORCE_BALANCING
+  savedDistance  Float
+  savedFuel      Float
+  savedCo2       Float
+  
+  createdAt      DateTime  @default(now())
+}
+
+// --- Behavioral Intelligence & Rewards ---
+
+model Wallet {
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id])
+  balance        Float     @default(0) // Swachh Coins
+  
+  updatedAt      DateTime  @updatedAt
+}
+
+model RewardTransaction {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  
+  amount         Float     // Positive for earned, negative for spent
+  type           String    // COMPLAINT_REPORTED, SEGREGATION_AUDIT, TASK_RESOLVED
+  description    String?
+  
+  createdAt      DateTime  @default(now())
+}
+
+model SegregationAudit {
+  id             String    @id @default(uuid())
+  userId         String?   // Auditor or Auto-generated
+  user           User?     @relation(fields: [userId], references: [id])
+  
+  complaintId    String?   @unique
+  complaint      Complaint? @relation(fields: [complaintId], references: [id])
+  
+  imagePath      String
+  qualityScore   Float     // 0-100
+  segregationType String   // WET, DRY, MIXED
+  
+  isVerified     Boolean   @default(false)
+  verifiedBy     String?   // Manual supervisor verification
+  
+  createdAt      DateTime  @default(now())
+}
+
+// --- Operational Foresight & Reliability ---
+
+model WastePrediction {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  wardId         String?
+  ward           Ward?     @relation(fields: [wardId], references: [id])
+  
+  date           DateTime
+  predictedVolume Float     // In Metric Tons
+  confidence     Float     // 0-1
+  factors        String?   // JSON factors (holiday, event, weather)
+  
+  createdAt      DateTime  @default(now())
+}
+
+model MaintenanceLog {
+  id             String    @id @default(uuid())
+  vehicleId      String
+  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id])
+  
+  type           String    // ROUTINE, REPAIR, EMERGENCY
+  description    String
+  cost           Float
+  partsReplaced  String?   // JSON list
+  odometer       Float?
+  
+  serviceDate    DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+}
+
+model ServiceSchedule {
+  id             String    @id @default(uuid())
+  vehicleId      String
+  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id])
+  
+  nextServiceAt  DateTime
+  serviceType    String
+  isCompleted    Boolean   @default(false)
+  
+  createdAt      DateTime  @default(now())
+}
+
+model InventoryItem {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  name           String    // e.g., "Air Filter", "Tire 10.00-20"
+  category       String
+  quantity       Int
+  minThreshold   Int       @default(5)
+  
+  updatedAt      DateTime  @updatedAt
+}
+
+// --- Intelligent Dispatch & ESG Transparency ---
+
+model DispatchLog {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  complaintId    String    @unique
+  complaint      Complaint @relation(fields: [complaintId], references: [id])
+  
+  assignedToId   String?
+  assignedTo     User?     @relation(fields: [assignedToId], references: [id])
+  
+  dispatchMode   String    @default("AUTO") // AUTO, MANUAL
+  reasoning      String?   // AI logic explanation
+  proximity      Float?    // Distance in KM
+  
+  createdAt      DateTime  @default(now())
+}
+
+model ESGReport {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  reportTitle    String
+  periodStart    DateTime
+  periodEnd      DateTime
+  
+  carbonSaved    Float     // Metric Tons
+  socialScore    Float     // 0-100
+  governanceCompliance Float // 0-1
+  
+  pdfPath        String?
+  isPublic       Boolean   @default(false)
+  
+  createdAt      DateTime  @default(now())
+}
+
+// --- Edge Intelligence & Aerial Surveillance ---
+
+model DroneFlight {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  flightCode     String    @unique
+  startTime      DateTime
+  endTime        DateTime?
+  pathGeometry   String?   // GeoJSON LineString of flight
+  coverageArea   Float?    // In sq km
+  
+  status         String    @default("PENDING") // PENDING, ACTIVE, COMPLETED, FAILED
+  batteryLevel   Float?
+  
+  createdAt      DateTime  @default(now())
+}
+
+model AerialHotspot {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  lat            Float
+  lng            Float
+  estimatedVolume Float     // In Cubic Meters
+  confidence     Float     // AI confidence score
+  
+  status         String    @default("DETECTED") // DETECTED, ASSIGNED, CLEARED
+  detectionType  String    @default("DRONE")   // DRONE, CITIZEN, CCTV
+  
+  imagePath      String?
+  createdAt      DateTime  @default(now())
+}
+
+model EdgeAudit {
+  id             String    @id @default(uuid())
+  vehicleId      String
+  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id])
+  
+  lat            Float
+  lng            Float
+  wasteType      String    // PLASTIC, PAPER, METAL, ORGANIC, HAZARDOUS
+  weightEstimate Float?
+  confidence     Float
+  
+  createdAt      DateTime  @default(now())
+}
+
+model SmartBin {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  wardId         String
+  ward           Ward      @relation(fields: [wardId], references: [id])
+  
+  code           String    @unique
+  lat            Float
+  lng            Float
+  fillLevel      Float     @default(0) // 0-100%
+  battery        Float?
+  lastPingAt     DateTime?
+  
+  createdAt      DateTime  @default(now())
+}
+
+// --- Municipal Decision Intelligence ---
+
+model AiRecommendation {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  title          String
+  description    String
+  priority       String    // HIGH, MEDIUM, LOW
+  category       String    // RESOURCE_ALLOCATION, SLA_PROTECTION, COST_OPTIMIZATION
+  suggestedAction String?
+  
+  isImplemented  Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+}
+
+model AnomalyLog {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  type           String    // GHOST_ATTENDANCE, ROUTE_DEVIATION, FAKE_PROOF, GPS_TAMPERING
+  severity       String    // CRITICAL, WARNING
+  details        String?
+  targetId       String?   // UserID or VehicleID
+  
+  createdAt      DateTime  @default(now())
+}
+
+model RiskScore {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  targetType     String    // WARD, CONTRACTOR, ROUTE
+  targetId       String
+  
+  score          Float     // 0-100
+  breakdown      String?   // JSON breakdown of risk factors
+  
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model OperationalSummary {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  date           DateTime
+  content        String    // AI generated markdown content
+  keyInsights    String?   // JSON list
+  efficiencyRating Float?
+  
+  createdAt      DateTime  @default(now())
+}
+
+// --- Municipal ERP & Tender Intelligence ---
+
+model Tender {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  title          String
+  description    String
+  budget         Float
+  status         String    @default("DRAFT") // DRAFT, ACTIVE, EXPIRED
+  kpiRules       String?   // JSON SLA rules
+  
+  contracts      Contract[]
+  
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model Contract {
+  id             String    @id @default(uuid())
+  tenderId       String
+  tender         Tender    @relation(fields: [tenderId], references: [id])
+  contractorId   String
+  contractor     Contractor @relation(fields: [contractorId], references: [id])
+  
+  startDate      DateTime
+  endDate        DateTime
+  value          Float
+  status         String    @default("ACTIVE") // ACTIVE, TERMINATED, COMPLETED
+  
+  invoices       Invoice[]
+  
+  createdAt      DateTime  @default(now())
+}
+
+model Invoice {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  contractId     String
+  contract       Contract  @relation(fields: [contractId], references: [id])
+  
+  invoiceNo      String    @unique
+  month          Int
+  year           Int
+  amount         Float
+  penaltyApplied Float     @default(0)
+  status         String    @default("PENDING") // PENDING, APPROVED, PAID, REJECTED
+  
+  payments       PaymentRecord[]
+  approvals      ApprovalRequest[]
+  
+  createdAt      DateTime  @default(now())
+}
+
+model PaymentRecord {
+  id             String    @id @default(uuid())
+  invoiceId      String
+  invoice        Invoice   @relation(fields: [invoiceId], references: [id])
+  
+  amount         Float
+  transactionRef String?
+  paymentDate    DateTime  @default(now())
+  method         String    // RTGS, NEFT, CHEQUE
+  
+  createdAt      DateTime  @default(now())
+}
+
+model AuditReport {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  title          String
+  type           String    // FINANCIAL, OPERATIONAL, COMPLIANCE
+  findings       String?   // JSON finding summary
+  status         String    @default("DRAFT")
+  
+  createdAt      DateTime  @default(now())
+}
+
+model Document {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  title          String
+  category       String    // CONTRACT, TENDER, VEHICLE_DOC, INVOICE
+  path           String
+  expiryDate     DateTime?
+  
+  createdAt      DateTime  @default(now())
+}
+
+model ApprovalRequest {
+  id             String    @id @default(uuid())
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  
+  invoiceId      String?
+  invoice        Invoice?  @relation(fields: [invoiceId], references: [id])
+  
+  type           String    // INVOICE_APPROVAL, TENDER_APPROVAL, PENALTY_WAIVER
+  requestedById  String
+  currentLevel   Int       @default(1)
+  status         String    @default("PENDING")
+  history        String?   // JSON approval history
+  
+  createdAt      DateTime  @default(now())
+}
+
+model Contractor {
+  id             String       @id @default(uuid())
+  name           String
+  orgId          String
+  organization   Organization @relation(fields: [orgId], references: [id])
+  contactPerson  String
+  phone          String
+  email          String
+  contractExpiry DateTime
+  
+  contracts      Contract[]
+}

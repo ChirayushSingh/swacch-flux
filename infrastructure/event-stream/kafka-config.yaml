@@ -1,0 +1,102 @@
+kafka:
+  brokers:
+    - msk-broker-1.ap-south-1.amazonaws.com:9092
+    - msk-broker-2.ap-south-1.amazonaws.com:9092
+    - msk-broker-3.ap-south-1.amazonaws.com:9092
+  schemaRegistryUrl: https://schema-registry.urban.gov.in
+  
+  topics:
+    # 1. Real-time High Throughput GPS Telemetry Stream (from vehicles and workers)
+    - name: telemetry.gps.inbound
+      partitions: 64
+      replicationFactor: 3
+      retentionMs: 604800000 # 7 Days raw retention
+      cleanupPolicy: delete
+      schema:
+        name: GpsPingEvent
+        type: record
+        fields:
+          - name: deviceId
+            type: string
+          - name: tenantId
+            type: string
+          - name: latitude
+            type: double
+          - name: longitude
+            type: double
+          - name: speedKmh
+            type: float
+          - name: headingDegrees
+            type: float
+          - name: timestamp
+            type: string
+
+    # 2. IoT Smart Bin Sensor Level Changes (Capacitive sensor metrics)
+    - name: telemetry.smartbin.inbound
+      partitions: 32
+      replicationFactor: 3
+      retentionMs: 2592000000 # 30 Days raw retention
+      schema:
+        name: SmartBinPingEvent
+        type: record
+        fields:
+          - name: binId
+            type: string
+          - name: tenantId
+            type: string
+          - name: fillLevelPercent
+            type: float
+          - name: batteryVolts
+            type: float
+          - name: tempCelsius
+            type: float
+          - name: timestamp
+            type: string
+
+    # 3. Core Complaint Lifecycle Audit Logs
+    - name: events.complaints.lifecycle
+      partitions: 16
+      replicationFactor: 3
+      cleanupPolicy: compact # Never delete last state to preserve auditable complaint lineage
+      schema:
+        name: ComplaintLifecycleEvent
+        type: record
+        fields:
+          - name: ticketId
+            type: string
+          - name: tenantId
+            type: string
+          - name: previousStatus
+            type: string
+          - name: newStatus
+            type: string
+          - name: modifiedByUserId
+            type: string
+          - name: timestamp
+            type: string
+
+    # 4. Financial approvals and tender bids
+    - name: events.erp.financials
+      partitions: 8
+      replicationFactor: 3
+      cleanupPolicy: compact
+      schema:
+        name: FinancialAuditEvent
+        type: record
+        fields:
+          - name: transactionId
+            type: string
+          - name: invoiceId
+            type: string
+          - name: tenantId
+            type: string
+          - name: contractorId
+            type: string
+          - name: amountInr
+            type: double
+          - name: type
+            type: string # PENALTY_APPLIED, INVOICE_APPROVED, FUNDS_SETTLED
+          - name: authorizedByUserId
+            type: string
+          - name: timestamp
+            type: string

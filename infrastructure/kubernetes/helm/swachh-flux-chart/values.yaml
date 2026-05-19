@@ -1,0 +1,193 @@
+global:
+  environment: production
+  nationalDomain: urban.gov.in
+  registry: ECR_REGISTRY_PLACEHOLDER
+
+# Multi-City Tenants config
+tenants:
+  - id: bmc  # Brihanmumbai Municipal Corporation
+    name: Mumbai
+    dbUrlSecret: bmc-db-secret
+    replicas: 10
+  - id: pmc  # Pune Municipal Corporation
+    name: Pune
+    dbUrlSecret: pmc-db-secret
+    replicas: 5
+  - id: ndmc # New Delhi Municipal Council
+    name: Delhi
+    dbUrlSecret: ndmc-db-secret
+    replicas: 6
+
+services:
+  auth:
+    name: auth-service
+    image: swachh/auth-service:latest
+    port: 5001
+    replicas: 3
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+    hpa:
+      minReplicas: 3
+      maxReplicas: 10
+      cpuUtilization: 75
+    env:
+      JWT_LIFETIME: 86400
+
+  complaint:
+    name: complaint-service
+    image: swachh/complaint-service:latest
+    port: 5002
+    replicas: 4
+    resources:
+      limits:
+        cpu: 1500m
+        memory: 2048Mi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+    hpa:
+      minReplicas: 4
+      maxReplicas: 15
+      cpuUtilization: 80
+
+  gis:
+    name: gis-service
+    image: swachh/gis-service:latest
+    port: 5003
+    replicas: 3
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 4096Mi
+      requests:
+        cpu: 1000m
+        memory: 1024Mi
+    hpa:
+      minReplicas: 3
+      maxReplicas: 8
+      cpuUtilization: 70
+
+  fleet:
+    name: fleet-service
+    image: swachh/fleet-service:latest
+    port: 5004
+    replicas: 4
+    resources:
+      limits:
+        cpu: 1500m
+        memory: 2048Mi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+    hpa:
+      minReplicas: 4
+      maxReplicas: 12
+      cpuUtilization: 75
+
+  erp:
+    name: erp-service
+    image: swachh/erp-service:latest
+    port: 5005
+    replicas: 2
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+    hpa:
+      minReplicas: 2
+      maxReplicas: 6
+      cpuUtilization: 80
+
+  ai:
+    name: ai-service
+    image: swachh/ai-service:latest
+    port: 5006
+    replicas: 2
+    resources:
+      limits:
+        cpu: 4000m
+        memory: 8192Mi
+      requests:
+        cpu: 2000m
+        memory: 4096Mi
+    hpa:
+      minReplicas: 2
+      maxReplicas: 5
+      cpuUtilization: 85
+
+  notification:
+    name: notification-service
+    image: swachh/notification-service:latest
+    port: 5007
+    replicas: 3
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+    hpa:
+      minReplicas: 3
+      maxReplicas: 10
+      cpuUtilization: 75
+
+  telemetry:
+    name: telemetry-service
+    image: swachh/telemetry-service:latest
+    port: 5008
+    replicas: 6
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2048Mi
+      requests:
+        cpu: 1000m
+        memory: 1024Mi
+    hpa:
+      minReplicas: 6
+      maxReplicas: 30
+      cpuUtilization: 70
+    kafka:
+      topic: raw-telemetry-inbound
+      groupId: gps-processing-group
+
+  reporting:
+    name: reporting-service
+    image: swachh/reporting-service:latest
+    port: 5009
+    replicas: 2
+    resources:
+      limits:
+        cpu: 1500m
+        memory: 2048Mi
+      requests:
+        cpu: 300m
+        memory: 512Mi
+
+  audit:
+    name: audit-service
+    image: swachh/audit-service:latest
+    port: 5010
+    replicas: 2
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+
+postgresql:
+  enabled: false # Use external Managed Aurora PostgreSQL for production
+
+kafka:
+  enabled: false # Use external AWS MSK Kafka Cluster for production

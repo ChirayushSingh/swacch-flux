@@ -1,0 +1,24 @@
+-- CreateTable
+CREATE TABLE "Attendance" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "orgId" TEXT NOT NULL,
+    "checkIn" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "checkOut" DATETIME,
+    "lat" REAL NOT NULL,
+    "lng" REAL NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'PRESENT',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "Attendance_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "Attendance_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "Organization" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "TrackingPing" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "lat" REAL NOT NULL,
+    "lng" REAL NOT NULL,
+    "timestamp" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "TrackingPing_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);

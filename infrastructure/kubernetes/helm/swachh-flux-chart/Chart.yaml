@@ -1,0 +1,15 @@
+apiVersion: v2
+name: swachh-flux
+description: India's National Urban Operations Platform (NUOP) - Municipal Cloud Infrastructure
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+dependencies:
+  - name: postgresql
+    version: 12.1.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: kafka
+    version: 19.1.4
+    repository: https://charts.bitnami.com/bitnami
+    condition: kafka.enabled

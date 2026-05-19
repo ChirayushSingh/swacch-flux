@@ -1,0 +1,87 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+  external_labels:
+    monitor: 'national-urban-observability-center'
+    region: 'ap-south-1'
+
+# Rule files specifies list of alert metrics triggers
+rule_files:
+  - "alert.rules"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "alertmanager.monitoring.svc.cluster.local:9093"
+
+scrape_configs:
+  - job_name: 'kubernetes-apiservers'
+    kubernetes_sd_configs:
+      - role: apiserver
+
+  - job_name: 'kubernetes-nodes'
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    kubernetes_sd_configs:
+      - role: node
+
+  - job_name: 'swachh-microservices'
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+
+# --- Alert Rules Definitions ---
+# Saved as alert.rules content
+alert_rules:
+  - name: SwachhFluxInfrastructureAlerts
+    rules:
+      - alert: ServiceDown
+        expr: up{tier="microservice"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Core service {{ $labels.instance }} is offline"
+          description: "A critical national smart city service instance has fallen out of active cluster orchestration."
+
+      - alert: TelemetryIngestFailure
+        expr: rate(telemetry_gps_pings_total[5m]) < 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ingestion rates for GPS telemetry are dropping"
+          description: "Massive telematics flow is below critical thresholds (current rate: {{ $value }} pings/sec). Verify Kafka brokers status."
+
+      - alert: SLAComplianceRisk
+        expr: average_sla_resolution_hours > 12
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SLA compliance resolution times breaching thresholds"
+          description: "Average citizen complaint resolution average is above 12 hours. Auto-escalating dispatch workloads."

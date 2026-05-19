@@ -1,0 +1,135 @@
+name: Swachh Flux CI/CD - National Municipal Cloud Deployer
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REGISTRY: 123456789012.dkr.ecr.ap-south-1.amazonaws.com
+  EKS_CLUSTER_NAME: national-urban-ops-eks
+
+jobs:
+  # Job 1: Static Code Analysis, Linting & Unit Testing
+  test-and-validate:
+    name: Lint, Test & Security Scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth, complaint, gis, fleet, erp, ai, notification, telemetry, reporting, audit]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install Monorepo Dependencies
+        run: |
+          cd server
+          npm ci
+
+      - name: Run Service Linter
+        run: |
+          cd server
+          npm run lint -- --filter=${{ matrix.service }}
+
+      - name: Execute Service Unit Tests
+        run: |
+          cd server
+          npm run test -- --filter=${{ matrix.service }}
+
+      # National Security Policy: Audit Docker containers for vulnerabilities
+      - name: Run Trivy Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
+
+  # Job 2: Build Multi-Stage Docker Images & Push to AWS ECR
+  build-and-publish:
+    name: Build & Push Microservices
+    needs: test-and-validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        service: [auth, complaint, gis, fleet, erp, ai, notification, telemetry, reporting, audit]
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, Tag & Secure ECR Push
+        run: |
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/swachh-${{ matrix.service }}-service:${{ github.sha }} \
+            -t ${{ env.ECR_REGISTRY }}/swachh-${{ matrix.service }}-service:latest \
+            -f server/docker/Dockerfile.${{ matrix.service }} server/
+          
+          docker push ${{ env.ECR_REGISTRY }}/swachh-${{ matrix.service }}-service:${{ github.sha }}
+          docker push ${{ env.ECR_REGISTRY }}/swachh-${{ matrix.service }}-service:latest
+
+  # Job 3: Rolling Canary Deployment to Elastic Kubernetes Service (EKS)
+  deploy-to-eks:
+    name: Rolling Kubernetes Upgrade
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout Helm Chart Configs
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update KubeConfig for EKS
+        run: |
+          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+      - name: Install & Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.11.1'
+
+      # Deploying the Helm chart dynamically with the new image tags
+      - name: Deploy Helm Chart Release
+        run: |
+          helm upgrade --install swachh-flux-production \
+            ./infrastructure/kubernetes/helm/swachh-flux-chart \
+            --namespace default \
+            --set global.registry=${{ env.ECR_REGISTRY }} \
+            --set global.environment=production \
+            --values ./infrastructure/kubernetes/helm/swachh-flux-chart/values.yaml
+
+      - name: Validate Kubernetes Pods Rollout Status
+        run: |
+          kubectl rollout status deployment/auth-service -n default --timeout=3m
+          kubectl rollout status deployment/complaint-service -n default --timeout=3m
+          kubectl rollout status deployment/telemetry-service -n default --timeout=3m

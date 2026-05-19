@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: swachh_user
+      POSTGRES_PASSWORD: swachh_password
+      POSTGRES_DB: swachh_flux
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    ports:
+      - '5000:5000'
+    environment:
+      DATABASE_URL: postgresql://swachh_user:swachh_password@db:5432/swachh_flux
+      NODE_ENV: production
+      JWT_SECRET: your_production_secret
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:

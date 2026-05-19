@@ -1,0 +1,91 @@
+{{- range $key, $service := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $service.name }}
+  labels:
+    app: {{ $service.name }}
+    tier: microservice
+spec:
+  replicas: {{ $service.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $service.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $service.name }}
+    spec:
+      containers:
+        - name: {{ $service.name }}
+          image: "{{ $.Values.global.registry }}/{{ $service.image }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ $service.port }}
+          resources:
+            limits:
+              cpu: {{ $service.resources.limits.cpu }}
+              memory: {{ $service.resources.limits.memory }}
+            requests:
+              cpu: {{ $service.resources.requests.cpu }}
+              memory: {{ $service.resources.requests.memory }}
+          env:
+            - name: NODE_ENV
+              value: {{ $.Values.global.environment }}
+            - name: SERVICE_PORT
+              value: "{{ $service.port }}"
+            - name: NATIONAL_DOMAIN
+              value: "{{ $.Values.global.nationalDomain }}"
+            {{- if $service.env }}
+            {{- range $envKey, $envVal := $service.env }}
+            - name: {{ $envKey }}
+              value: "{{ $envVal }}"
+            {{- end }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ $service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: {{ $service.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $service.name }}
+  labels:
+    app: {{ $service.name }}
+spec:
+  ports:
+    - port: {{ $service.port }}
+      targetPort: {{ $service.port }}
+      protocol: TCP
+  selector:
+    app: {{ $service.name }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $service.name }}-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $service.name }}
+  minReplicas: {{ $service.hpa.minReplicas | default 2 }}
+  maxReplicas: {{ $service.hpa.maxReplicas | default 10 }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $service.hpa.cpuUtilization | default 80 }}
+{{- end }}

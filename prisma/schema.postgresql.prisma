@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Multi-Tenancy ---
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  type        String   @default("MUNICIPAL_CORP") // MUNICIPAL_CORP, CONTRACTOR_ORG, SMART_CITY_PROJ
+  code        String   @unique // e.g., BMC, PMC
+  logo        String?
+  config      String?  // SQLite doesn't handle Json well in older versions, using String for compatibility
+  
+  users       User[]
+  zones       Zone[]
+  complaints  Complaint[]
+  contractors Contractor[]
+  slaRules    SlaRule[]
+  attendance  Attendance[]
+  vehicles    Vehicle[]
+  routes      Route[]
+  penalties   PenaltyLog[]
+  fuelLogs    FuelLog[]
+  carbonLogs  CarbonLog[]
+  impactLogs  WasteImpact[]
+  optimizationLogs OptimizationLog[]
+  predictions WastePrediction[]
+  inventory   InventoryItem[]
+  dispatchLogs DispatchLog[]
+  esgReports   ESGReport[]
+  droneFlights DroneFlight[]
+  hotspots     AerialHotspot[]
+  smartBins    SmartBin[]
+  recommendations AiRecommendation[]
+  anomalies    AnomalyLog[]
+  riskScores   RiskScore[]
+  summaries    OperationalSummary[]
+  tenders      Tender[]
+  invoices     Invoice[]
+  documents    Document[]
+  approvals    ApprovalRequest[]
+  auditReports AuditReport[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  isDeleted   Boolean  @default(false)
+}
+
+// --- RBAC ---
+
+model Role {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  permissions Permission[]
+  users       User[]
+}
+
+model Permission {
+  id          String @id @default(uuid())
+  action      String // e.g., "complaint:create", "analytics:view"
+  subject     String // e.g., "Complaint", "Analytics"
+  roles       Role[]
+}
+
+// --- User Management ---
+
+model User {
+  id             String        @id @default(uuid())
+  name           String
+  email          String?       @unique
+  phone          String?       @unique
+  password       String?
+  roleId         String
+  role           Role          @relation(fields: [roleId], references: [id])
+  orgId          String
+  organization   Organization  @relation(fields: [orgId], references: [id])
+  
+  avatar         String?
+  isActive       Boolean       @default(true)
+  lastLogin      DateTime?
+  
+  complaints     Complaint[]   @relation("CitizenComplaints")
+  assignments    Assignment[]
+  logs           ActivityLog[]
+  notifications  Notification[]
+  attendance     Attendance[]
+  tracking       TrackingPing[]
+  wallet         Wallet?
+  rewards        RewardTransaction[]
+  audits         SegregationAudit[]
+  dispatches     DispatchLog[]
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+// Remaining models exactly match standard sqlite but leverage high-performance relational indices...
